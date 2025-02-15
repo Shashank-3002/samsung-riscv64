@@ -1,0 +1,239 @@
+#include <ch32v00x.h>
+#include <debug.h>
+#include <ch32v00x_gpio.h>
+#include <stdio.h>
+
+#define SDA_PIN GPIO_Pin_1
+#define SCL_PIN GPIO_Pin_2
+#define LCD_Address 0x27
+#define MQ135_PIN GPIO_Pin_5
+#define DHT11_PIN GPIO_Pin_4
+
+void lcd_send_cmd(unsigned char cmd);
+void lcd_send_data(unsigned char data);
+void lcd_send_str(unsigned char *str); // Change to char*
+void lcd_init(void);
+void delay_ms(unsigned int ms);
+void GPIO_INIT(void);
+uint16_t Read_MQ135(void);
+uint8_t DHT11_Read(uint8_t *temperature, uint8_t *humidity);
+
+void delay_ms(unsigned int ms) {
+    for (unsigned int i = 0; i < ms; i++) {
+        for (unsigned int j = 0; j < 8000; j++) {
+            __NOP();
+        }
+    }
+}
+
+// Function to initialize GPIO pins
+void GPIO_INIT(void) {
+    GPIO_InitTypeDef GPIO_InitStructure;
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOD | RCC_APB2Periph_GPIOC, ENABLE);
+
+    // I2C Pins
+    GPIO_InitStructure.GPIO_Pin = SDA_PIN | SCL_PIN;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_OD;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOC, &GPIO_InitStructure);
+
+    // Configure GPIO pin for gas sensor input
+    GPIO_InitStructure.GPIO_Pin = MQ135_PIN;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU; // Input mode with pull-up resistor
+    GPIO_Init(GPIOD, &GPIO_InitStructure);
+ }
+
+// I2C Functions
+void i2c_write(unsigned char dat) {
+    for (unsigned char i = 0; i < 8; i++) {
+        GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+        GPIO_WriteBit(GPIOC, SDA_PIN, (dat & (0x80 >> i)) ? Bit_SET : Bit_RESET);
+        GPIO_WriteBit(GPIOC, SCL_PIN, Bit_SET);
+    }
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+}
+
+void i2c_start(void) {
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_SET);
+    GPIO_WriteBit(GPIOC, SDA_PIN, Bit_SET);
+    delay_ms(1);
+    GPIO_WriteBit(GPIOC, SDA_PIN, Bit_RESET);
+    delay_ms(1);
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+}
+
+void i2c_stop(void) {
+    GPIO_WriteBit(GPIOC, SDA_PIN, Bit_RESET);
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+    delay_ms(1);
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_SET);
+    delay_ms(1);
+    GPIO_WriteBit(GPIOC, SDA_PIN, Bit_SET);
+}
+
+int i2c_ACK(void) {
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+    GPIO_WriteBit(GPIOC, SDA_PIN, Bit_SET);
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_SET);
+    int ack = GPIO_ReadInputDataBit(GPIOC, SDA_PIN);
+    GPIO_WriteBit(GPIOC, SCL_PIN, Bit_RESET);
+    return ack; // Return 0 if ACK received, 1 if not
+}
+
+// LCD Functions
+void lcd_send_cmd(unsigned char cmd) {
+    unsigned char cmd_l = (cmd << 4) & 0xf0;
+    unsigned char cmd_u = cmd & 0xf0;
+
+    i2c_start();
+    i2c_write(LCD_Address << 1);
+    if (i2c_ACK()) return; // Check for ACK
+    i2c_write(cmd_u | 0x0C);
+    i2c_ACK();
+    i2c_write(cmd_u | 0x08);
+    i2c_ACK();
+    delay_ms(1);
+    i2c_write(cmd_l | 0x0C);
+    i2c_ACK();
+    i2c_write(cmd_l | 0x08);
+    i2c_ACK();
+    delay_ms(1);
+    i2c_stop();
+}
+
+void lcd_send_data(unsigned char data) {
+    unsigned char data_l = (data << 4) & 0xf0;
+    unsigned char data_u = data & 0xf0;
+
+    i2c_start();
+    i2c_write(LCD_Address << 1);
+    if (i2c_ACK()) return; // Check for ACK
+    i2c_write(data_u | 0x0D);
+    i2c_ACK();
+    i2c_write(data_u | 0x09);
+    i2c_ACK();
+    delay_ms(1);
+    i2c_write(data_l | 0x0D);
+    i2c_ACK();
+    i2c_write(data_l | 0x09);
+    i2c_ACK();
+    delay_ms(1);
+    i2c_stop();
+}
+
+void lcd_send_str(unsigned char *str) { // Change to char*
+    while (*str) {
+        lcd_send_data(*str++);
+    }
+}
+
+void lcd_init(void) {
+    lcd_send_cmd(0x02); // Initialize LCD in 4-bit mode
+    lcd_send_cmd(0x28); // 2 lines, 5x7 matrix
+    lcd_send_cmd(0x0C); // Display ON, Cursor OFF
+    lcd_send_cmd(0x06); // Entry mode set
+    lcd_send_cmd(0x01); // Clear display
+    delay_ms(20);
+}
+
+uint16_t Read_MQ135(void) {
+    ADC_RegularChannelConfig(ADC1, MQ135_PIN, 1, ADC_SampleTime_15Cycles);
+    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+    while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+    return ADC_GetConversionValue(ADC1);
+}
+
+uint8_t DHT11_Read(uint8_t *temperature, uint8_t *humidity) {
+    uint8_t data[5] = {0};
+    GPIO_InitTypeDef GPIO_InitStructure;
+
+    // Configure DHT11 pin as output to send start signal
+    GPIO_InitStructure.GPIO_Pin = DHT11_PIN;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOC, &GPIO_InitStructure);
+
+    // Send start signal
+    GPIO_WriteBit(GPIOC, DHT11_PIN, Bit_RESET);
+    delay_ms(18);
+    GPIO_WriteBit(GPIOC, DHT11_PIN, Bit_SET);
+    delay_ms(1);
+
+    // Configure DHT11 pin as input to read data
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+    GPIO_Init(GPIOC, &GPIO_InitStructure);
+
+    // Wait for response
+    while (GPIO_ReadInputDataBit(GPIOC, DHT11_PIN));
+    while (!GPIO_ReadInputDataBit(GPIOC, DHT11_PIN));
+    while (GPIO_ReadInputDataBit(GPIOC, DHT11_PIN));
+
+    // Read 40-bit data
+    for (uint8_t i = 0; i < 5; i++) {
+        for (uint8_t j = 0; j < 8; j++) {
+            while (!GPIO_ReadInputDataBit(GPIOC, DHT11_PIN));
+            delay_ms(1);
+            if (GPIO_ReadInputDataBit(GPIOC, DHT11_PIN)) {
+                data[i] |= (1 << (7 - j));
+            }
+            while (GPIO_ReadInputDataBit(GPIOC, DHT11_PIN));
+        }
+    }
+
+    // Checksum validation
+    if ((data[0] + data[1] + data[2] + data[3]) == data[4]) {
+        *humidity = data[0];
+        *temperature = data[2];
+        return 1;
+    }
+    return 0;
+}
+
+
+int main(void) {
+    uint8_t temperature = 0, humidity = 0;
+    uint16_t airQuality = 0;
+
+    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
+    SystemCoreClockUpdate();
+    Delay_Init();
+    GPIO_INIT();
+    lcd_init();
+    lcd_send_cmd(0x80);  // First row, first column
+    while (1) {
+        lcd_send_cmd(0x01);
+        delay_ms(10);
+        lcd_send_cmd(0x80);
+        unsigned char airQuality1[16]= "Air Quality:";
+        lcd_send_str(airQuality1);
+        lcd_send_cmd(0xC0);
+        airQuality = Read_MQ135();
+        unsigned char airQualityStr[16];
+        sprintf((char*)airQualityStr, "Value: %d", airQuality);
+        lcd_send_str(airQualityStr);
+        delay_ms(5000);
+
+        lcd_send_cmd(0x01);
+        delay_ms(10);
+        lcd_send_cmd(0x80);
+        unsigned char Temperature[16] = "Temperature:";
+        lcd_send_str(Temperature);
+        DHT11_Read(&temperature, &humidity);
+        lcd_send_cmd(0xC0);
+        unsigned char temperatureStr[16];
+        sprintf((char*)temperatureStr, "Value: %d ", temperature);
+        lcd_send_str(temperatureStr);
+        delay_ms(5000);
+
+        lcd_send_cmd(0x01);
+        delay_ms(10);
+        lcd_send_cmd(0x80);
+        unsigned char humidity[16] = "Humidity:";
+        lcd_send_str(humidity);
+        lcd_send_cmd(0xC0);
+        unsigned char humidityStr[16];
+        sprintf((char*)humidityStr, "Value: %d", humidity);
+        lcd_send_str(humidityStr);
+        delay_ms(5000);
+    }
+}
