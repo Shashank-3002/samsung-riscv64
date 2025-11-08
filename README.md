@@ -10,23 +10,23 @@
 ----------------------------------------------------------------------------------------------------------------
 
 <details>
-<summary><b>Task 1:</b>Task is to install all the essential tools required for this samsung-RISCV  Workshop such as Ubuntu on VMBox & refer to C based and RISCV based lab videos and execute the task of compiling the C code using gcc and riscv compiler</summary><br>
+<summary><b>Task 1:</b> The Task is to install all the essential tools required for this Samsung-RISCV  Workshop, such as Ubuntu on VMBox & refer to C-based and RISCV-based lab videos and execute the task of compiling the C code using gcc and RISCV compiler</summary><br>
 
 ### Install Ubuntu 20.04 LTS on Oracle Virtual Machine Box
 
-Firstly, I have downloaded the virtual box from the links provided to us and
-loaded a linux version with image dock file sent  
+Firstly, I have downloaded the VirtualBox from the links provided to us and
+loaded a Linux version with the image dock file sent  
 ![output_sum1ton](https://github.com/user-attachments/assets/dda0192f-413a-40b9-b8ff-188e3fdd46ca)
 
 
-### C Language based LAB
+### C Language-based LAB
 I have successfully run the virtual machine and compiled the tasks.
 
 Initial task is:-
 
-### write a program to compile the sum of first 5 natural numbers in c:
+### write a program to compile the sum of the first 5 natural numbers in c:
 
-we have written the code sum of 1st 5 numbers in leafpad as shown below.
+we have written the code sum of 1st 5 numbers in Leafpad as shown below.
 
 ```
 gcc sum_1ton.c
